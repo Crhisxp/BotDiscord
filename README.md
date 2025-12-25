@@ -1,44 +1,67 @@
 # 🎵 Bot de Música para Discord
 
-Bot de música profesional para Discord con arquitectura limpia y modular.
+Bot de música profesional con soporte para YouTube, Spotify, SoundCloud usando Wavelink y Lavalink.
 
-## 🚀 Características
+## ✨ Características
 
-- Reproducción de música desde YouTube
-- Comandos intuitivos con aliases
-- Control de volumen
-- Sistema de logging
-- Arquitectura modular y escalable
-- Manejo robusto de errores
+- ✅ Sin errores HTTP 403 de YouTube
+- 🎵 Soporte para YouTube, Spotify, SoundCloud, Apple Music
+- 📋 Sistema de cola avanzado
+- 🔊 Control de volumen
+- ⚡ Reproducción rápida y sin interrupciones
+- 🎨 Embeds con información detallada
 
-## 📋 Requisitos
+1. **Clona el repositorio**
 
-- Python 3.10+
-- FFmpeg instalado en el sistema
-- Token de bot de Discord
+git clone <tu-repo>
+cd BOTDISCORD
 
-## 🛠️ Instalación
+2. **Instala las dependencias**
+pip install -r requirements.txt
 
-1. Clona el repositorio
-2. Instala dependencias: `pip install -r requirements.txt`
-3. Configura el token en `.env`
-4. Ejecuta: `python bot.py`
+3. **Configura el archivo .env**
+DISCORD_TOKEN=tu_token_aqui
+LAVALINK_HOST=lavalink.jirayu.net
+LAVALINK_PORT=13592
+LAVALINK_PASSWORD=youshallnotpass
+LAVALINK_SECURE=False
+PREFIX=!
+
+4. **Ejecuta el bot**
+python bot.py
 
 ## 📝 Comandos
 
 ### Música
-- `!play <canción>` - Reproduce una canción
-- `!pause` - Pausa la música
-- `!resume` - Reanuda la música
-- `!skip` - Salta la canción actual
-- `!stop` - Detiene la reproducción
-- `!join` - Conecta el bot
-- `!leave` - Desconecta el bot
-- `!volume <0-100>` - Ajusta el volumen
+- `!play <canción>` - Reproduce música
+- `!pause` - Pausa/reanuda
+- `!skip` - Siguiente canción
+- `!stop` - Detener y limpiar cola
+- `!queue` - Ver cola
+- `!nowplaying` - Canción actual
+- `!volume <0-100>` - Ajustar volumen
+- `!disconnect` - Desconectar bot
 
 ### General
-- `!ping` - Muestra latencia
-- `!help` - Lista de comandos
+- `!ping` - Latencia del bot
+- `!info` - Información del bot
+- `!help` - Ayuda
 
-## 📁 Estructura
+## 🔧 Servidores Lavalink Públicos Gratuitos
 
+El bot usa servidores públicos de Lavalink. Opciones disponibles:
+
+- `lavalink.jirayu.net:13592` (por defecto)
+- `lavalink.devamop.in:443`
+- `lava.link:80`
+
+## 📦 Tecnologías
+
+- discord.py 2.x
+- Wavelink
+- Lavalink v4
+- Python 3.11+
+
+## 📄 Licencia
+
+MIT License

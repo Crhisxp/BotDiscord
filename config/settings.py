@@ -1,48 +1,19 @@
-"""
-Configuración centralizada del bot
-"""
 import os
-from dataclasses import dataclass
+from dotenv import load_dotenv
 
-@dataclass
-class Settings:
-    """Configuraciones del bot"""
-    
-    # Token de Discord
-    DISCORD_TOKEN: str = os.getenv('DISCORD_TOKEN')
-    
-    # Prefijo de comandos
-    COMMAND_PREFIX: str = '!'
-    
-    # Configuración de yt-dlp
-    YDL_OPTIONS = {
-        'format': 'bestaudio/best',
-        'extractaudio': True,
-        'audioformat': 'mp3',
-        'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-        'restrictfilenames': True,
-        'noplaylist': True,
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'logtostderr': False,
-        'quiet': True,
-        'no_warnings': True,
-        'default_search': 'auto',
-        'source_address': '0.0.0.0',
-    }
-    
-    # Configuración de FFmpeg (corregida)
-    FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
-    }
+load_dotenv()
 
-    
-    @classmethod
-    def validate(cls):
-        """Valida que las configuraciones necesarias estén presentes"""
-        if not cls.DISCORD_TOKEN:
-            raise ValueError("DISCORD_TOKEN no está configurado en las variables de entorno")
+# Discord settings
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+PREFIX = os.getenv('PREFIX', '!')
 
-# Instancia global de configuración
-config = Settings()
+# Lavalink settings
+LAVALINK_HOST = os.getenv('LAVALINK_HOST', 'lavalink.jirayu.net')
+LAVALINK_PORT = int(os.getenv('LAVALINK_PORT', 13592))
+LAVALINK_PASSWORD = os.getenv('LAVALINK_PASSWORD', 'youshallnotpass')
+LAVALINK_SECURE = os.getenv('LAVALINK_SECURE', 'False').lower() == 'true'
+
+# Bot settings
+MAX_QUEUE_SIZE = 100
+DEFAULT_VOLUME = 50
+TIMEOUT_SECONDS = 300  # 5 minutos de inactividad

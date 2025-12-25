@@ -1,162 +1,304 @@
-"""
-Comandos relacionados con música
-"""
 import discord
 from discord.ext import commands
-from utils.music_player import MusicPlayer
+import wavelink
+from typing import cast
+import asyncio
+from config.settings import (
+    LAVALINK_HOST, 
+    LAVALINK_PORT, 
+    LAVALINK_PASSWORD, 
+    LAVALINK_SECURE,
+    DEFAULT_VOLUME,
+    TIMEOUT_SECONDS
+)
+from utils.music_player import MusicQueue, format_duration
 from utils.logger import logger
 
 class Music(commands.Cog):
-    """Cog para comandos de música"""
+    """Cog de música con Wavelink y Lavalink"""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.player = MusicPlayer()
+        self.queues = {}  # Guild ID: MusicQueue
+        
+    async def cog_load(self):
+        """Se ejecuta cuando el cog se carga"""
+        try:
+            # Crear nodo de Lavalink
+            node: wavelink.Node = wavelink.Node(
+                uri=f'{"https" if LAVALINK_SECURE else "http"}://{LAVALINK_HOST}:{LAVALINK_PORT}',
+                password=LAVALINK_PASSWORD
+            )
+            
+            # Conectar al pool
+            await wavelink.Pool.connect(client=self.bot, nodes=[node])
+            logger.info(f"✓ Conectado a Lavalink: {LAVALINK_HOST}:{LAVALINK_PORT}")
+        except Exception as e:
+            logger.error(f"✗ Error conectando a Lavalink: {e}")
     
-    @commands.command(name='join', aliases=['j', 'conectar'])
-    async def join(self, ctx: commands.Context):
-        """Conecta el bot a tu canal de voz"""
+    def get_queue(self, guild_id: int) -> MusicQueue:
+        """Obtener o crear cola para un servidor"""
+        if guild_id not in self.queues:
+            self.queues[guild_id] = MusicQueue()
+        return self.queues[guild_id]
+    
+    @commands.Cog.listener()
+    async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
+        """Evento cuando Lavalink está listo"""
+        logger.info(f"✓ Nodo Lavalink listo: {payload.node.identifier}")
+    
+    @commands.Cog.listener()
+    async def on_wavelink_track_start(self, payload: wavelink.TrackStartEventPayload):
+        """Evento cuando una canción empieza"""
+        player: wavelink.Player = payload.player
+        track: wavelink.Playable = payload.track
+        
+        if player.guild:
+            logger.info(f"▶️ Reproduciendo: {track.title} en {player.guild.name}")
+    
+    @commands.Cog.listener()
+    async def on_wavelink_track_end(self, payload: wavelink.TrackEndEventPayload):
+        """Evento cuando una canción termina"""
+        player: wavelink.Player = payload.player
+        
+        if not player.guild:
+            return
+        
+        queue = self.get_queue(player.guild.id)
+        
+        # Reproducir siguiente canción si hay en la cola
+        if not queue.is_empty():
+            next_track = queue.get_next()
+            await player.play(next_track)
+        else:
+            # Desconectar después de inactividad
+            await asyncio.sleep(TIMEOUT_SECONDS)
+            if player and not player.playing:
+                await player.disconnect()
+                logger.info(f"🔌 Desconectado por inactividad en {player.guild.name}")
+    
+    @commands.command(name='play', aliases=['p'])
+    async def play(self, ctx: commands.Context, *, busqueda: str):
+        """
+        Reproduce una canción desde YouTube, Spotify, SoundCloud, etc.
+        
+        Uso: !play <URL o nombre de canción>
+        Ejemplo: !play Hillsong United
+        """
         if not ctx.author.voice:
-            await ctx.send('❌ Debes estar en un canal de voz')
-            return
+            return await ctx.send("❌ Debes estar en un canal de voz primero.")
         
-        channel = ctx.author.voice.channel
-        
-        if ctx.voice_client:
-            await ctx.voice_client.move_to(channel)
+        # Conectar al canal de voz
+        if not ctx.voice_client:
+            try:
+                vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
+                await vc.set_volume(DEFAULT_VOLUME)
+            except Exception as e:
+                return await ctx.send(f"❌ Error al conectar: {str(e)}")
         else:
-            await channel.connect()
+            vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
         
-        await ctx.send(f'✅ Conectado a **{channel.name}**')
-        logger.info(f"Conectado a {channel.name} en {ctx.guild.name}")
-    
-    @commands.command(name='leave', aliases=['disconnect', 'dc', 'salir'])
-    async def leave(self, ctx: commands.Context):
-        """Desconecta el bot del canal de voz"""
-        if not ctx.voice_client:
-            await ctx.send('❌ No estoy conectado a ningún canal')
-            return
+        # Mensaje de búsqueda
+        search_msg = await ctx.send(f"🔎 Buscando: **{busqueda}**...")
         
-        await ctx.voice_client.disconnect()
-        await ctx.send('👋 Desconectado')
-        logger.info(f"Desconectado de {ctx.guild.name}")
-    
-    @commands.command(name='play', aliases=['p', 'reproducir'])
-    async def play(self, ctx: commands.Context, *, query: str):
-        """
-        Reproduce una canción desde YouTube
-        
-        Uso: !play <nombre o URL>
-        """
-        # Conectar si no está en un canal
-        if not ctx.voice_client:
-            if ctx.author.voice:
-                await ctx.author.voice.channel.connect()
-            else:
-                await ctx.send('❌ Debes estar en un canal de voz')
+        try:
+            # Buscar la canción (soporta YouTube, Spotify, SoundCloud automáticamente)
+            tracks: wavelink.Search = await wavelink.Playable.search(busqueda)
+            
+            if not tracks:
+                await search_msg.edit(content="❌ No se encontraron resultados.")
                 return
-        
-        # Detener reproducción actual
-        if ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
-        
-        # Buscar canción
-        await ctx.send(f'🔍 Buscando: **{query}**')
-        song_info = await self.player.search_song(query)
-        
-        if not song_info:
-            await ctx.send('❌ No se pudo encontrar la canción')
-            return
-        
-        # Crear fuente de audio
-        source = await self.player.create_audio_source(song_info['url'])
-        
-        if not source:
-            await ctx.send('❌ Error al procesar el audio')
-            return
-        
-        # Reproducir
-        def after_playing(error):
-            if error:
-                logger.error(f"Error durante reproducción: {error}")
-        
-        ctx.voice_client.play(source, after=after_playing)
-        
-        # Enviar mensaje con información
-        embed = discord.Embed(
-            title="🎵 Reproduciendo",
-            description=f"**{song_info['title']}**",
-            color=discord.Color.green()
-        )
-        
-        if song_info['thumbnail']:
-            embed.set_thumbnail(url=song_info['thumbnail'])
-        
-        if song_info['duration']:
-            minutes = song_info['duration'] // 60
-            seconds = song_info['duration'] % 60
-            embed.add_field(name="Duración", value=f"{minutes}:{seconds:02d}")
-        
-        await ctx.send(embed=embed)
-        logger.info(f"Reproduciendo: {song_info['title']}")
+            
+            # Tomar la primera canción
+            track: wavelink.Playable = tracks[0]
+            
+            queue = self.get_queue(ctx.guild.id)
+            
+            # Si está reproduciendo, añadir a la cola
+            if vc.playing:
+                if queue.add(track):
+                    embed = discord.Embed(
+                        title="✅ Añadido a la cola",
+                        description=f"**[{track.title}]({track.uri})**",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="Duración", value=format_duration(track.length))
+                    embed.add_field(name="Posición en cola", value=f"#{queue.size()}")
+                    if track.artwork:
+                        embed.set_thumbnail(url=track.artwork)
+                    await search_msg.edit(content=None, embed=embed)
+                else:
+                    await search_msg.edit(content="❌ La cola está llena (máximo 100 canciones).")
+            else:
+                # Reproducir inmediatamente
+                await vc.play(track)
+                embed = discord.Embed(
+                    title="🎵 Reproduciendo ahora",
+                    description=f"**[{track.title}]({track.uri})**",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="Duración", value=format_duration(track.length))
+                embed.add_field(name="Solicitado por", value=ctx.author.mention)
+                if track.artwork:
+                    embed.set_thumbnail(url=track.artwork)
+                await search_msg.edit(content=None, embed=embed)
+                
+        except wavelink.LavalinkException as e:
+            await search_msg.edit(content=f"❌ Error de Lavalink: {str(e)}")
+        except Exception as e:
+            await search_msg.edit(content=f"❌ Error inesperado: {str(e)}")
+            logger.error(f"Error en comando play: {e}")
     
-    @commands.command(name='pause', aliases=['pausa'])
+    @commands.command(name='pause')
     async def pause(self, ctx: commands.Context):
-        """Pausa la reproducción actual"""
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.pause()
-            await ctx.send('⏸️ Música pausada')
+        """Pausa o reanuda la reproducción"""
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc:
+            return await ctx.send("❌ No estoy en un canal de voz.")
+        
+        await vc.pause(not vc.paused)
+        
+        if vc.paused:
+            await ctx.send("⏸️ Reproducción pausada.")
         else:
-            await ctx.send('❌ No hay música reproduciéndose')
+            await ctx.send("▶️ Reproducción reanudada.")
     
-    @commands.command(name='resume', aliases=['continuar'])
-    async def resume(self, ctx: commands.Context):
-        """Reanuda la reproducción pausada"""
-        if ctx.voice_client and ctx.voice_client.is_paused():
-            ctx.voice_client.resume()
-            await ctx.send('▶️ Música reanudada')
-        else:
-            await ctx.send('❌ La música no está pausada')
-    
-    @commands.command(name='stop', aliases=['detener'])
-    async def stop(self, ctx: commands.Context):
-        """Detiene la reproducción y limpia la cola"""
-        if ctx.voice_client:
-            ctx.voice_client.stop()
-            await ctx.send('⏹️ Reproducción detenida')
-        else:
-            await ctx.send('❌ No hay música reproduciéndose')
-    
-    @commands.command(name='skip', aliases=['s', 'siguiente'])
+    @commands.command(name='skip', aliases=['s'])
     async def skip(self, ctx: commands.Context):
         """Salta a la siguiente canción"""
-        if ctx.voice_client and ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
-            await ctx.send('⏭️ Canción saltada')
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc or not vc.playing:
+            return await ctx.send("❌ No hay nada reproduciéndose.")
+        
+        queue = self.get_queue(ctx.guild.id)
+        
+        if queue.is_empty():
+            await vc.stop()
+            await ctx.send("⏭️ Canción saltada. No hay más canciones en la cola.")
         else:
-            await ctx.send('❌ No hay música reproduciéndose')
+            await vc.stop()  # Esto activará el evento track_end que reproduce la siguiente
+            await ctx.send("⏭️ Canción saltada.")
     
-    @commands.command(name='volume', aliases=['vol', 'v'])
-    async def volume(self, ctx: commands.Context, volume: int = None):
+    @commands.command(name='stop')
+    async def stop(self, ctx: commands.Context):
+        """Detiene la música y limpia la cola"""
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc:
+            return await ctx.send("❌ No estoy en un canal de voz.")
+        
+        queue = self.get_queue(ctx.guild.id)
+        queue.clear()
+        
+        await vc.stop()
+        await ctx.send("⏹️ Reproducción detenida y cola limpiada.")
+    
+    @commands.command(name='disconnect', aliases=['dc', 'leave'])
+    async def disconnect(self, ctx: commands.Context):
+        """Desconecta el bot del canal de voz"""
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc:
+            return await ctx.send("❌ No estoy en un canal de voz.")
+        
+        queue = self.get_queue(ctx.guild.id)
+        queue.clear()
+        
+        await vc.disconnect()
+        await ctx.send("👋 Desconectado del canal de voz.")
+    
+    @commands.command(name='queue', aliases=['q'])
+    async def queue(self, ctx: commands.Context):
+        """Muestra la cola de reproducción"""
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc:
+            return await ctx.send("❌ No estoy en un canal de voz.")
+        
+        queue = self.get_queue(ctx.guild.id)
+        
+        embed = discord.Embed(
+            title="🎵 Cola de reproducción",
+            color=discord.Color.blue()
+        )
+        
+        # Canción actual
+        if vc.current:
+            embed.add_field(
+                name="▶️ Reproduciendo ahora",
+                value=f"**[{vc.current.title}]({vc.current.uri})**\nDuración: {format_duration(vc.current.length)}",
+                inline=False
+            )
+        
+        # Próximas canciones
+        if not queue.is_empty():
+            queue_text = ""
+            for i, track in enumerate(queue.queue[:10], 1):  # Mostrar máximo 10
+                queue_text += f"`{i}.` **[{track.title}]({track.uri})** - {format_duration(track.length)}\n"
+            
+            embed.add_field(
+                name=f"📋 Próximas ({queue.size()} canciones)",
+                value=queue_text,
+                inline=False
+            )
+            
+            if queue.size() > 10:
+                embed.set_footer(text=f"Y {queue.size() - 10} canciones más...")
+        else:
+            embed.add_field(
+                name="📋 Cola vacía",
+                value="No hay canciones en la cola.",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+    
+    @commands.command(name='volume', aliases=['vol'])
+    async def volume(self, ctx: commands.Context, volumen: int = None):
         """
         Ajusta el volumen (0-100)
         
-        Uso: !volume <número>
+        Uso: !volume <0-100>
         """
-        if volume is None:
-            await ctx.send('📢 Uso: `!volume <0-100>`')
-            return
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
         
-        if not 0 <= volume <= 100:
-            await ctx.send('❌ El volumen debe estar entre 0 y 100')
-            return
+        if not vc:
+            return await ctx.send("❌ No estoy en un canal de voz.")
         
-        if ctx.voice_client and ctx.voice_client.source:
-            ctx.voice_client.source.volume = volume / 100
-            await ctx.send(f'🔊 Volumen ajustado a **{volume}%**')
-        else:
-            await ctx.send('❌ No hay música reproduciéndose')
+        if volumen is None:
+            return await ctx.send(f"🔊 Volumen actual: **{vc.volume}%**")
+        
+        if not 0 <= volumen <= 100:
+            return await ctx.send("❌ El volumen debe estar entre 0 y 100.")
+        
+        await vc.set_volume(volumen)
+        await ctx.send(f"🔊 Volumen ajustado a **{volumen}%**")
+    
+    @commands.command(name='nowplaying', aliases=['np'])
+    async def nowplaying(self, ctx: commands.Context):
+        """Muestra la canción actual"""
+        vc: wavelink.Player = cast(wavelink.Player, ctx.voice_client)
+        
+        if not vc or not vc.current:
+            return await ctx.send("❌ No hay nada reproduciéndose.")
+        
+        track = vc.current
+        
+        embed = discord.Embed(
+            title="🎵 Reproduciendo ahora",
+            description=f"**[{track.title}]({track.uri})**",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(name="Duración", value=format_duration(track.length))
+        embed.add_field(name="Volumen", value=f"{vc.volume}%")
+        
+        if track.artwork:
+            embed.set_thumbnail(url=track.artwork)
+        
+        await ctx.send(embed=embed)
 
 async def setup(bot: commands.Bot):
-    """Carga el cog"""
     await bot.add_cog(Music(bot))

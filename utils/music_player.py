@@ -1,63 +1,49 @@
-"""
-Utilidades para reproducción de música
-"""
 import discord
-import yt_dlp
-import asyncio
-from typing import Optional, Dict
-from utils.logger import logger
-from config.settings import config
+import wavelink
+from typing import Optional
 
-class MusicPlayer:
-    """Clase para manejar la reproducción de música"""
+class MusicQueue:
+    """Clase para manejar la cola de música"""
     
-    def __init__(self):
-        self.ytdl = yt_dlp.YoutubeDL(config.YDL_OPTIONS)
+    def __init__(self, max_size: int = 100):
+        self.queue: list[wavelink.Playable] = []
+        self.max_size = max_size
+        self.history: list[wavelink.Playable] = []
     
-    async def search_song(self, query: str) -> Optional[Dict]:
-        """
-        Busca una canción en YouTube
-        
-        Args:
-            query: Término de búsqueda
-            
-        Returns:
-            Información de la canción o None si falla
-        """
-        try:
-            loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(
-                None,
-                lambda: self.ytdl.extract_info(f"ytsearch:{query}", download=False)
-            )
-            
-            if 'entries' in data:
-                data = data['entries'][0]
-            
-            return {
-                'url': data['url'],
-                'title': data.get('title', 'Desconocido'),
-                'duration': data.get('duration', 0),
-                'thumbnail': data.get('thumbnail', ''),
-            }
-        except Exception as e:
-            logger.error(f"Error buscando canción '{query}': {e}")
-            return None
+    def add(self, track: wavelink.Playable) -> bool:
+        """Añadir canción a la cola"""
+        if len(self.queue) >= self.max_size:
+            return False
+        self.queue.append(track)
+        return True
     
-    @staticmethod
-    async def create_audio_source(url: str) -> Optional[discord.FFmpegPCMAudio]:
-        """
-        Crea una fuente de audio desde una URL
-        
-        Args:
-            url: URL del audio
-            
-        Returns:
-            Fuente de audio o None si falla
-        """
-        try:
-            return discord.FFmpegPCMAudio(url, **config.FFMPEG_OPTIONS)
-        except Exception as e:
-            logger.error(f"Error creando fuente de audio: {e}")
-            return None
+    def get_next(self) -> Optional[wavelink.Playable]:
+        """Obtener siguiente canción"""
+        if self.queue:
+            track = self.queue.pop(0)
+            self.history.append(track)
+            return track
+        return None
+    
+    def clear(self):
+        """Limpiar la cola"""
+        self.queue.clear()
+    
+    def is_empty(self) -> bool:
+        """Verificar si la cola está vacía"""
+        return len(self.queue) == 0
+    
+    def size(self) -> int:
+        """Obtener tamaño de la cola"""
+        return len(self.queue)
+
+def format_duration(milliseconds: int) -> str:
+    """Formatear duración en ms a formato legible"""
+    seconds = milliseconds // 1000
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
