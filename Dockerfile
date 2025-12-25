@@ -9,12 +9,13 @@ LABEL description="Discord Music Bot con Wavelink"
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Directorio de trabajo
 WORKDIR /app
 
-# Instalar dependencias del sistema (ffmpeg, opus, etc)
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libopus0 \
@@ -23,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copiar solo requirements primero (para cache de Docker)
+# Copiar requirements
 COPY requirements.txt .
 
 # Instalar dependencias de Python
@@ -40,9 +41,6 @@ RUN useradd -m -u 1000 botuser && \
 # Cambiar a usuario no-root
 USER botuser
 
-# Health check (opcional pero recomendado)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import discord; print('OK')" || exit 1
-
 # Comando de inicio
 CMD ["python", "-u", "bot.py"]
+
