@@ -45,7 +45,7 @@ class MusicPlayer:
             return None
     
     @staticmethod
-    async def create_audio_source(url: str) -> Optional[discord.FFmpegOpusAudio]:
+    async def create_audio_source(url: str) -> Optional[discord.FFmpegPCMAudio]:
         """
         Crea una fuente de audio desde una URL
         
@@ -56,10 +56,8 @@ class MusicPlayer:
             Fuente de audio o None si falla
         """
         try:
-            return await discord.FFmpegOpusAudio.from_probe(
-                url,
-                **config.FFMPEG_OPTIONS
-            )
+            return discord.FFmpegPCMAudio(url, **config.FFMPEG_OPTIONS)
         except Exception as e:
             logger.error(f"Error creando fuente de audio: {e}")
             return None
+
