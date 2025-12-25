@@ -10,6 +10,15 @@ from pathlib import Path
 from config.settings import config
 from utils.logger import logger
 
+# Cargar opus para audio
+if not discord.opus.is_loaded():
+    try:
+        discord.opus.load_opus('libopus.so.0')
+        logger.info("✓ Opus cargado correctamente")
+    except Exception as e:
+        logger.warning(f"⚠ No se pudo cargar opus automáticamente: {e}")
+        logger.info("Intentando cargar opus por defecto...")
+
 class MusicBot(commands.Bot):
     """Clase principal del bot"""
     
@@ -45,6 +54,13 @@ class MusicBot(commands.Bot):
         logger.info(f'Bot conectado como {self.user}')
         logger.info(f'ID: {self.user.id}')
         logger.info(f'Servidores: {len(self.guilds)}')
+        
+        # Verificar que opus está cargado
+        if discord.opus.is_loaded():
+            logger.info('✓ Opus está disponible para audio')
+        else:
+            logger.error('✗ Opus NO está cargado - la reproducción de audio puede fallar')
+        
         logger.info('Bot listo para usar!')
         
         # Establecer estado
