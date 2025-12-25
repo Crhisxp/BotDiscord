@@ -3,14 +3,7 @@ from discord.ext import commands
 import wavelink
 from typing import cast
 import asyncio
-from config.settings import (
-    LAVALINK_HOST, 
-    LAVALINK_PORT, 
-    LAVALINK_PASSWORD, 
-    LAVALINK_SECURE,
-    DEFAULT_VOLUME,
-    TIMEOUT_SECONDS
-)
+import os
 from utils.music_player import MusicQueue, format_duration
 from utils.logger import logger
 
@@ -24,10 +17,24 @@ class Music(commands.Cog):
     async def cog_load(self):
         """Se ejecuta cuando el cog se carga"""
         try:
+            # Leer variables de entorno
+            LAVALINK_HOST = os.getenv('LAVALINK_HOST', 'lavalink.devamop.in')
+            LAVALINK_PORT = int(os.getenv('LAVALINK_PORT', '443'))
+            LAVALINK_PASSWORD = os.getenv('LAVALINK_PASSWORD', 'WjnmBMsZ5B')
+            LAVALINK_SECURE = os.getenv('LAVALINK_SECURE', 'True').lower() == 'true'
+            
+            # Construir URI correctamente
+            protocol = "https" if LAVALINK_SECURE else "http"
+            uri = f"{protocol}://{LAVALINK_HOST}:{LAVALINK_PORT}"
+            
+            logger.info(f"🔗 Intentando conectar a Lavalink: {uri}")
+            logger.info(f"🔑 Password: {LAVALINK_PASSWORD}")
+            
             # Crear nodo de Lavalink
             node: wavelink.Node = wavelink.Node(
-                uri=f'{"https" if LAVALINK_SECURE else "http"}://{LAVALINK_HOST}:{LAVALINK_PORT}',
-                password=LAVALINK_PASSWORD
+                uri=uri,
+                password=LAVALINK_PASSWORD,
+                identifier='primary-node'
             )
             
             # Conectar al pool
@@ -35,6 +42,7 @@ class Music(commands.Cog):
             logger.info(f"✓ Conectado a Lavalink: {LAVALINK_HOST}:{LAVALINK_PORT}")
         except Exception as e:
             logger.error(f"✗ Error conectando a Lavalink: {e}")
+            logger.error(f"✗ Tipo de error: {type(e).__name__}")
     
     def get_queue(self, guild_id: int) -> MusicQueue:
         """Obtener o crear cola para un servidor"""
@@ -46,6 +54,7 @@ class Music(commands.Cog):
     async def on_wavelink_node_ready(self, payload: wavelink.NodeReadyEventPayload):
         """Evento cuando Lavalink está listo"""
         logger.info(f"✓ Nodo Lavalink listo: {payload.node.identifier}")
+        logger.info(f"✓ URI: {payload.node.uri}")
     
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: wavelink.TrackStartEventPayload):
@@ -72,7 +81,7 @@ class Music(commands.Cog):
             await player.play(next_track)
         else:
             # Desconectar después de inactividad
-            await asyncio.sleep(TIMEOUT_SECONDS)
+            await asyncio.sleep(300)  # 5 minutos
             if player and not player.playing:
                 await player.disconnect()
                 logger.info(f"🔌 Desconectado por inactividad en {player.guild.name}")
@@ -92,7 +101,7 @@ class Music(commands.Cog):
         if not ctx.voice_client:
             try:
                 vc: wavelink.Player = await ctx.author.voice.channel.connect(cls=wavelink.Player)
-                await vc.set_volume(DEFAULT_VOLUME)
+                await vc.set_volume(50)
             except Exception as e:
                 return await ctx.send(f"❌ Error al conectar: {str(e)}")
         else:
