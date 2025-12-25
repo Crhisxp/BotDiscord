@@ -1,114 +1,88 @@
+"""
+Bot de Música para Discord
+Punto de entrada principal
+"""
 import discord
 from discord.ext import commands
-import yt_dlp
 import asyncio
-import os
+from pathlib import Path
 
-# Configuración de intents
-intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
+from config.settings import config
+from utils.logger import logger
 
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Configuración de yt-dlp
-YDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'ytsearch',
-    'source_address': '0.0.0.0'
-}
-
-FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn'
-}
-
-@bot.event
-async def on_ready():
-    print(f'{bot.user} está listo!')
-
-@bot.command()
-async def join(ctx):
-    """Conecta el bot a tu canal de voz"""
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        await channel.connect()
-        await ctx.send(f'✅ Conectado a {channel}')
-    else:
-        await ctx.send('❌ Debes estar en un canal de voz')
-
-@bot.command()
-async def play(ctx, *, search):
-    """Reproduce música desde YouTube"""
-    voice_client = ctx.guild.voice_client
+class MusicBot(commands.Bot):
+    """Clase principal del bot"""
     
-    if not voice_client:
-        if ctx.author.voice:
-            voice_client = await ctx.author.voice.channel.connect()
-        else:
-            await ctx.send('❌ Debes estar en un canal de voz')
-            return
+    def __init__(self):
+        # Configurar intents
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.voice_states = True
+        
+        super().__init__(
+            command_prefix=config.COMMAND_PREFIX,
+            intents=intents,
+            help_command=None  # Usamos nuestro comando de ayuda personalizado
+        )
     
-    await ctx.send(f'🔍 Buscando: {search}')
+    async def setup_hook(self):
+        """Carga los cogs al iniciar"""
+        logger.info("Cargando extensiones...")
+        
+        # Cargar todos los cogs
+        cogs_path = Path(__file__).parent / 'cogs'
+        for cog_file in cogs_path.glob('*.py'):
+            if cog_file.name != '__init__.py':
+                cog_name = f'cogs.{cog_file.stem}'
+                try:
+                    await self.load_extension(cog_name)
+                    logger.info(f"✓ Cargado: {cog_name}")
+                except Exception as e:
+                    logger.error(f"✗ Error cargando {cog_name}: {e}")
+    
+    async def on_ready(self):
+        """Evento cuando el bot está listo"""
+        logger.info(f'Bot conectado como {self.user}')
+        logger.info(f'ID: {self.user.id}')
+        logger.info(f'Servidores: {len(self.guilds)}')
+        logger.info('Bot listo para usar!')
+        
+        # Establecer estado
+        await self.change_presence(
+            activity=discord.Activity(
+                type=discord.ActivityType.listening,
+                name="!help para comandos"
+            )
+        )
+    
+    async def on_guild_join(self, guild: discord.Guild):
+        """Evento cuando el bot se une a un servidor"""
+        logger.info(f"Bot agregado al servidor: {guild.name} (ID: {guild.id})")
+    
+    async def on_guild_remove(self, guild: discord.Guild):
+        """Evento cuando el bot es removido de un servidor"""
+        logger.info(f"Bot removido del servidor: {guild.name} (ID: {guild.id})")
+
+async def main():
+    """Función principal"""
+    # Validar configuración
+    try:
+        config.validate()
+    except ValueError as e:
+        logger.error(f"Error de configuración: {e}")
+        return
+    
+    # Crear y ejecutar bot
+    bot = MusicBot()
     
     try:
-        loop = asyncio.get_event_loop()
-        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            info = await loop.run_in_executor(None, lambda: ydl.extract_info(f"ytsearch:{search}", download=False))
-            if 'entries' in info:
-                info = info['entries'][0]
-            
-            url = info['url']
-            title = info['title']
-        
-        voice_client.play(discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS))
-        await ctx.send(f'🎵 Reproduciendo: {title}')
+        await bot.start(config.DISCORD_TOKEN)
+    except KeyboardInterrupt:
+        logger.info("Bot detenido por el usuario")
     except Exception as e:
-        await ctx.send(f'❌ Error al reproducir: {str(e)}')
+        logger.error(f"Error crítico: {e}")
+    finally:
+        await bot.close()
 
-@bot.command()
-async def pause(ctx):
-    """Pausa la música actual"""
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.pause()
-        await ctx.send('⏸️ Música pausada')
-    else:
-        await ctx.send('❌ No hay música reproduciéndose')
-
-@bot.command()
-async def resume(ctx):
-    """Reanuda la música pausada"""
-    if ctx.voice_client and ctx.voice_client.is_paused():
-        ctx.voice_client.resume()
-        await ctx.send('▶️ Música reanudada')
-    else:
-        await ctx.send('❌ La música no está pausada')
-
-@bot.command()
-async def stop(ctx):
-    """Detiene la música y desconecta el bot"""
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send('⏹️ Desconectado')
-    else:
-        await ctx.send('❌ No estoy conectado a ningún canal')
-
-@bot.command()
-async def skip(ctx):
-    """Salta la canción actual"""
-    if ctx.voice_client and ctx.voice_client.is_playing():
-        ctx.voice_client.stop()
-        await ctx.send('⏭️ Canción saltada')
-    else:
-        await ctx.send('❌ No hay música reproduciéndose')
-
-# Obtener token desde variable de entorno
-TOKEN = os.getenv('DISCORD_TOKEN')
-
-if TOKEN is None:
-    print("ERROR: No se encontró el token. Asegúrate de configurar DISCORD_TOKEN")
-else:
-    bot.run(TOKEN)
-
+if __name__ == '__main__':
+    asyncio.run(main())
